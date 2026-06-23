@@ -2,20 +2,26 @@ require('dotenv').config();
 const express = require('express');
 const morgan = require('morgan');
 const sequelize = require('./config/database');
-const creditApplicationRoutes = require('./routes/creditApplicationRoutes');
+const externalDataRoutes = require('./routes/externalDataRoutes');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
+const { getBreakerStatus } = require('./simulators/creditBureauSimulator');
 
 const app = express();
-const PORT = process.env.PORT || 3002;
+const PORT = process.env.PORT || 3007;
 
 app.use(express.json());
 app.use(morgan('dev'));
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'credit-application-service', timestamp: new Date() });
+  res.json({
+    status: 'ok',
+    service: 'external-data-service',
+    timestamp: new Date(),
+    circuit_breaker: getBreakerStatus(),
+  });
 });
 
-app.use('/api/credit-applications', creditApplicationRoutes);
+app.use('/api/external-data', externalDataRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);
@@ -25,7 +31,7 @@ async function bootstrap() {
     await sequelize.authenticate();
     console.log('Conexión a Neon PostgreSQL establecida.');
     app.listen(PORT, () => {
-      console.log(`credit-application-service corriendo en http://localhost:${PORT}`);
+      console.log(`external-data-service corriendo en http://localhost:${PORT}`);
     });
   } catch (error) {
     console.error('Error al iniciar el servicio:', error);

@@ -1,98 +1,111 @@
-# credit-application-service
+# NeoLend Financial Corp — Microservicios de Crédito
 
-Microservicio del sistema **NeoLend Financial Corp** responsable de gestionar el ciclo de vida de las solicitudes de crédito, desde su creación hasta el desembolso.
+Repositorio con dos microservicios del ecosistema **NeoLend Financial Corp**:
+
+| Servicio | Puerto | Responsabilidad |
+|----------|--------|-----------------|
+| `credit-application-service` | 3002 | Ciclo de vida de solicitudes de crédito |
+| `external-data-service` | 3007 | Consulta de fuentes de datos externas (buró, servicios públicos, billeteras, e-commerce, recargas) |
+
+Ambos comparten la misma base de datos **Neon PostgreSQL** con schemas separados (`credit` y `scoring`).
 
 ---
 
 ## Cobertura de la Rúbrica
 
-| N° MVP | Descripción | Ponderación | Cobertura en este servicio |
-|--------|-------------|-------------|---------------------------|
-| 1 | Solicitud de crédito, motor de scoring con fuentes alternativas y aprobación automática (Incisos I, II, III) | 60% |  **Inciso I** – Creación de solicitud con monto, plazo y motivo. Gestión de estado hacia `DATA_COLLECTING` y `SCORING`. |
-| 2 | Desembolso multi-canal e integración con billeteras/corresponsales, y módulo de cobranza (Incisos IV, V) | 70% |  **Inciso IV** – Transición de estado `APPROVED → DISBURSED` que dispara el flujo de desembolso. |
-| 3 | Portal de inversionistas, detección de fraude y módulo gamificado (Incisos VI, VII, VIII) | 80% | ⚙️ Parcial – Expone estado de solicitudes consultable por otros servicios (inversionistas, fraude). |
-| 4 | Trazabilidad auditada de decisiones de scoring con firma digital para la Superintendencia (Contexto Adicional b) | 100% |  Parcial – Provee `application_id` como agregado raíz para el `audit.event_store`. |
+| N° MVP | Descripción | Ponderación | Cobertura |
+|--------|-------------|-------------|-----------|
+| 1 — Inciso I | Solicitud de crédito: creación con monto, plazo y motivo | 60% | `credit-application-service` — crea y persiste solicitudes en `credit.credit_applications` |
+| 1 — Inciso II | Motor de scoring con fuentes alternativas | 60% | `external-data-service` — consulta buró (IBM Z + circuit breaker), servicios públicos, billeteras, e-commerce, recargas; acumula scores en `scoring.external_data_snapshots` |
+| 1 — Inciso III | Aprobación automática basada en score | 60% | Preparado — umbrales configurables via env (`AUTO_APPROVAL_LIMIT`, `MIN_SCORE_APPROVAL`, `MIN_SCORE_MANUAL_REVIEW`) |
+| 2 — Inciso IV | Desembolso multi-canal | 70% | Transición de estado `APPROVED → DISBURSED` en `credit-application-service` |
+| 3 — Incisos VI–VIII | Portal inversionistas / fraude / gamificación | 80% | Expone estados y datos consultables por otros servicios |
+| 4 — Contexto b | Trazabilidad auditada con firma digital | 100% | `application_id` como raíz de agregado para `audit.event_store` |
 
-> Este servicio es el **núcleo del flujo MVP 1**. El motor de scoring (Inciso II) y la aprobación automática (Inciso III) son responsabilidad del `scoring-service`, que consume los datos expuestos aquí.
-
----
-
-## ¿Qué hace este servicio?
-
-- Recibe solicitudes de crédito desde la app móvil/web.
-- Almacena los datos en la tabla `credit.credit_applications` de Neon PostgreSQL.
-- Controla el **ciclo de estados** de cada solicitud con transiciones válidas:
-
-```
-CREATED → DATA_COLLECTING → SCORING → APPROVED → DISBURSED
-                                    ↘ MANUAL_REVIEW → APPROVED
-                         (cualquier estado) → REJECTED
-```
-
-- Valida los datos de entrada (monto, plazo, UUID del solicitante).
-- Expone endpoints REST consumidos por otros microservicios del ecosistema NeoLend.
+> El **motor de scoring final** (Inciso III) es responsabilidad del `scoring-service` (pendiente), que consume el `composite_score` del `external-data-service` y actualiza el estado via `credit-application-service`.
 
 ---
 
 ## Requisitos previos
 
 - Node.js >= 18
-- Cuenta en [Neon](https://neon.tech) con el schema SQL de NeoLend aplicado
 - npm
+- Cuenta en [Neon](https://neon.tech) con el schema SQL de NeoLend aplicado
 
 ---
 
-## Instalación
+## Instalación y arranque
+
+### credit-application-service (puerto 3002)
 
 ```bash
-# 1. Clonar el repositorio
-git clone <repo-url>
-cd credit-application-service
+# En la raíz del repositorio
+npm install
 
-# 2. Instalar dependencias
+npm run dev             # desarrollo con hot-reload
+# npm start             # producción
+```
+
+Verificar:
+```bash
+curl http://localhost:3002/health
+```
+
+### external-data-service (puerto 3003)
+
+```bash
+cd external-data-service
 npm install
 
 
+npm run dev
+# npm start
+```
+
+Verificar:
+```bash
+curl http://localhost:3003/health
+# La respuesta incluye el estado del circuit breaker del buró crediticio
+```
+
+> Ambos servicios pueden correr simultáneamente en terminales separadas.
 
 ---
 
 ## Variables de entorno
 
-Completa los valores:
+### credit-application-service (`.env`)
 
 | Variable | Descripción | Ejemplo |
 |----------|-------------|---------|
 | `PORT` | Puerto del servidor | `3002` |
 | `NODE_ENV` | Ambiente | `development` |
 | `DATABASE_URL` | Connection string de Neon | `postgresql://user:pass@ep-xxx.neon.tech/db?sslmode=require` |
-| `SECRET_JWT_SEED` | Semilla para JWT (uso futuro con auth middleware) | `NeoLend-Secret-Key` |
+| `SECRET_JWT_SEED` | Semilla para JWT | `NeoLend-Secret-Key` |
 | `AUTO_APPROVAL_LIMIT` | Monto máximo para aprobación automática (USD) | `500` |
-| `MIN_SCORE_APPROVAL` | Score mínimo para aprobación | `700` |
+| `MIN_SCORE_APPROVAL` | Score mínimo para aprobación directa | `700` |
+| `MIN_SCORE_MANUAL_REVIEW` | Score mínimo para revisión manual | `600` |
 | `AUDIT_ENABLED` | Habilitar trazabilidad en `audit.event_store` | `true` |
 | `DIGITAL_SIGNATURE_SECRET` | Secreto para firmas digitales de auditoría | `NeoLendAuditSignature2026` |
 
----
+### external-data-service (`external-data-service/.env`)
 
-## Ejecución
-
-```bash
-# Desarrollo (con hot-reload)
-npm run dev
-
-# Producción
-npm start
-```
-
-El servidor arranca en `http://localhost:3002` (o el `PORT` configurado).
-
-Verificar que está corriendo:
-```bash
-curl http://localhost:3002/health
-```
+| Variable | Descripción | Ejemplo |
+|----------|-------------|---------|
+| `PORT` | Puerto del servidor | `3007` |
+| `NODE_ENV` | Ambiente | `development` |
+| `DATABASE_URL` | Misma URL de Neon que el servicio anterior | `postgresql://...` |
+| `CIRCUIT_BREAKER_THRESHOLD` | Fallos antes de abrir el circuit breaker | `5` |
+| `CIRCUIT_BREAKER_RESET_MS` | Ms hasta intentar recuperar el buró | `30000` |
 
 ---
 
-## Endpoints
+## Endpoints — credit-application-service
+
+Base URL: `http://localhost:3002`
+
+### `GET /health`
+Estado del servicio.
 
 ### `POST /api/credit-applications`
 Crear una nueva solicitud de crédito.
@@ -100,7 +113,7 @@ Crear una nueva solicitud de crédito.
 **Body:**
 ```json
 {
-  "applicant_id": "uuid-del-solicitante",
+  "applicant_id": "550e8400-e29b-41d4-a716-446655440000",
   "requested_amount": 350.00,
   "currency": "USD",
   "term_months": 12,
@@ -112,7 +125,7 @@ Crear una nueva solicitud de crédito.
 ```json
 {
   "id": "uuid-generado",
-  "applicant_id": "uuid-del-solicitante",
+  "applicant_id": "550e8400-e29b-41d4-a716-446655440000",
   "requested_amount": "350.00",
   "currency": "USD",
   "term_months": 12,
@@ -123,26 +136,18 @@ Crear una nueva solicitud de crédito.
 }
 ```
 
----
-
 ### `GET /api/credit-applications/:id`
 Obtener una solicitud por su ID.
-
----
 
 ### `GET /api/credit-applications/applicant/:applicantId`
 Listar todas las solicitudes de un solicitante, ordenadas por fecha descendente.
 
----
-
 ### `PATCH /api/credit-applications/:id/status`
-Actualizar el estado de una solicitud. Solo acepta transiciones válidas.
+Actualizar el estado de una solicitud. Solo acepta transiciones válidas según la máquina de estados.
 
 **Body:**
 ```json
-{
-  "status": "DATA_COLLECTING"
-}
+{ "status": "DATA_COLLECTING" }
 ```
 
 **Error 422** si la transición no es válida:
@@ -154,55 +159,207 @@ Actualizar el estado de una solicitud. Solo acepta transiciones válidas.
 
 ---
 
-## Estados de solicitud
+## Estados de solicitud y transiciones válidas
+
+```
+CREATED → DATA_COLLECTING → SCORING → APPROVED → DISBURSED
+                                    ↘ MANUAL_REVIEW → APPROVED
+              (desde cualquier estado activo) → REJECTED
+```
 
 | Estado | Descripción |
 |--------|-------------|
 | `CREATED` | Solicitud recibida y registrada |
-| `DATA_COLLECTING` | Recopilando datos externos (buró, servicios públicos, etc.) |
+| `DATA_COLLECTING` | Recopilando datos externos vía `external-data-service` |
 | `SCORING` | Motor de scoring procesando el puntaje crediticio |
-| `APPROVED` | Solicitud aprobada (automática ≤ USD 500, o manual) |
+| `APPROVED` | Aprobada (automática si monto ≤ `AUTO_APPROVAL_LIMIT` y score ≥ `MIN_SCORE_APPROVAL`) |
 | `MANUAL_REVIEW` | Requiere revisión de analista de riesgo |
-| `REJECTED` | Solicitud rechazada |
-| `DISBURSED` | Crédito desembolsado al solicitante |
+| `REJECTED` | Solicitud rechazada (estado terminal) |
+| `DISBURSED` | Crédito desembolsado (estado terminal) |
 
 ---
 
-## Estructura del proyecto
+## Endpoints — external-data-service
 
+Base URL: `http://localhost:3007`
+
+### `GET /health`
+Incluye el estado actual del circuit breaker del buró crediticio:
+```json
+{
+  "status": "ok",
+  "service": "external-data-service",
+  "circuit_breaker": { "state": "CLOSED", "failures": 0 }
+}
 ```
-src/
-├── config/
-│   └── database.js          # Conexión Sequelize + Neon SSL
-├── models/
-│   └── CreditApplication.js # Modelo → credit.credit_applications
-├── services/
-│   └── creditApplicationService.js  # Lógica de negocio
-├── controllers/
-│   └── creditApplicationController.js
-├── routes/
-│   └── creditApplicationRoutes.js
-├── validators/
-│   └── creditApplicationValidator.js  # Validación Joi
-├── middleware/
-│   └── errorHandler.js
-└── app.js                   # Bootstrap del servidor
+
+### `POST /api/external-data/credit-bureau`
+Consulta al buró crediticio (simula mainframe IBM Z). **Tiempo de respuesta: 8–15 segundos.**
+
+**Body:**
+```json
+{
+  "application_id": "uuid-de-la-solicitud",
+  "document_number": "12345678"
+}
+```
+
+**Respuesta 200:**
+```json
+{
+  "application_id": "...",
+  "credit_bureau_score": 750,
+  "report_date": "2026-06-23",
+  "has_delinquency": false,
+  "risk_category": "BAJO",
+  "from_cache": false
+}
+```
+
+**Respuesta 503** si el circuit breaker está abierto:
+```json
+{
+  "error": "Circuit breaker ABIERTO: buró crediticio no disponible",
+  "circuit_breaker": { "state": "OPEN", "failures": 5 }
+}
+```
+
+### `POST /api/external-data/utilities`
+Historial de pagos de servicios públicos (LUZ, AGUA, GAS, TELEFONÍA). Latencia: 500–1500ms.
+
+**Body:**
+```json
+{
+  "application_id": "uuid-de-la-solicitud",
+  "applicant_id": "uuid-del-solicitante"
+}
+```
+
+### `POST /api/external-data/wallets`
+Actividad en billeteras digitales (YAPE, PLIN, NEQUI, DAVIPLATA). Latencia: 300–1000ms.
+
+Mismo body que `/utilities`.
+
+### `POST /api/external-data/ecommerce`
+Historial en plataformas de e-commerce (MERCADOLIBRE, AMAZON, SHOPIFY). Latencia: 400–1000ms.
+
+Mismo body que `/utilities`.
+
+### `POST /api/external-data/mobile-topups`
+Historial de recargas móviles (CLARO, MOVISTAR, ENTEL, BITEL). Latencia: 200–700ms.
+
+Mismo body que `/utilities`.
+
+### `GET /api/external-data/summary/:applicationId`
+Resumen consolidado con todos los scores y el score compuesto.
+
+**Respuesta 200:**
+```json
+{
+  "application_id": "...",
+  "credit_bureau_score": 750,
+  "utility_payment_score": 820,
+  "wallet_transaction_score": 690,
+  "ecommerce_score": 710,
+  "mobile_topup_score": 650,
+  "composite_score": 724,
+  "all_sources_ready": true
+}
+```
+
+> `composite_score` es el promedio de las fuentes disponibles. `all_sources_ready` es `true` cuando los 5 scores están presentes.
+
+---
+
+## Cómo probar en Postman (flujo completo)
+
+### Paso 1 — Crear solicitud
+`POST http://localhost:3002/api/credit-applications`
+```json
+{
+  "applicant_id": "550e8400-e29b-41d4-a716-446655440000",
+  "requested_amount": 350,
+  "term_months": 12,
+  "purpose": "Capital de trabajo"
+}
+```
+Guardar el `id` retornado como `{{application_id}}`.
+
+### Paso 2 — Avanzar a DATA_COLLECTING
+`PATCH http://localhost:3002/api/credit-applications/{{application_id}}/status`
+```json
+{ "status": "DATA_COLLECTING" }
+```
+
+### Paso 3 — Consultar el buró (esperar 8–15s)
+`POST http://localhost:3003/api/external-data/credit-bureau`
+```json
+{
+  "application_id": "{{application_id}}",
+  "document_number": "12345678"
+}
+```
+
+### Paso 4 — Consultar las otras 4 fuentes (en paralelo o secuencial)
+```
+POST http://localhost:3003/api/external-data/utilities
+POST http://localhost:3003/api/external-data/wallets
+POST http://localhost:3003/api/external-data/ecommerce
+POST http://localhost:3003/api/external-data/mobile-topups
+```
+Body para todas:
+```json
+{
+  "application_id": "{{application_id}}",
+  "applicant_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+### Paso 5 — Ver el resumen consolidado
+`GET http://localhost:3003/api/external-data/summary/{{application_id}}`
+
+### Paso 6 — Avanzar a SCORING y luego APPROVED
+```
+PATCH .../status  →  { "status": "SCORING" }
+PATCH .../status  →  { "status": "APPROVED" }
+PATCH .../status  →  { "status": "DISBURSED" }
 ```
 
 ---
 
-## Integración con otros microservicios
+## Estructura del repositorio
 
 ```
-App Móvil
-    │
-    ▼
-credit-application-service  ──── (application_id) ───▶  external-data-service
-    │                                                          │
-    │◀──────── status: DATA_COLLECTING → SCORING ─────────────┘
-    │
-    ├── (application_id) ──▶  scoring-service
-    │       └── APPROVED / REJECTED / MANUAL_REVIEW
-    │
-    └── (application_id) ──▶  audit.event_store (trazabilidad Superintendencia)
+credit-application-service/          ← raíz del repo (puerto 3002)
+├── src/
+│   ├── config/database.js            # Sequelize + Neon SSL
+│   ├── models/CreditApplication.js   # → credit.credit_applications
+│   ├── services/creditApplicationService.js
+│   ├── controllers/creditApplicationController.js
+│   ├── routes/creditApplicationRoutes.js
+│   ├── validators/creditApplicationValidator.js
+│   ├── middleware/errorHandler.js
+│   └── app.js
+├── .env.example
+├── package.json
+│
+external-data-service/                ← subfolder (puerto 3003)
+├── src/
+│   ├── config/database.js
+│   ├── models/ExternalDataSnapshot.js  # → scoring.external_data_snapshots
+│   ├── simulators/
+│   │   ├── circuitBreaker.js           # Circuit breaker manual (CLOSED/OPEN/HALF_OPEN)
+│   │   ├── creditBureauSimulator.js    # IBM Z mainframe + caché en memoria
+│   │   ├── utilitiesSimulator.js
+│   │   ├── walletsSimulator.js
+│   │   ├── ecommerceSimulator.js
+│   │   └── mobileTopupsSimulator.js
+│   ├── services/externalDataService.js
+│   ├── controllers/externalDataController.js
+│   ├── routes/externalDataRoutes.js
+│   ├── validators/externalDataValidator.js
+│   ├── middleware/errorHandler.js
+│   └── app.js
+├── .env.example
+└── package.json
 ```
