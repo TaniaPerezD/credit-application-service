@@ -271,6 +271,75 @@ Resumen consolidado con todos los scores y el score compuesto.
 
 ---
 
+## Estrategia de Circuit Breaker — Buró de Crédito (IBM Z Mainframe)
+
+El buró de crédito nacional opera sobre un mainframe IBM Z con una API SOAP que presenta una latencia inherente de entre **8 y 15 segundos** por consulta y una tasa de fallo del **20%**. Para proteger el sistema ante estas condiciones, se implementó el patrón **Circuit Breaker** con tres estados.
+
+### Estados del circuit breaker
+
+```
+                 ┌─────────────────────────────────────────┐
+                 │                                         │
+          fallos >= umbral                         1 llamada exitosa
+                 │                                         │
+                 ▼                                         │
+  ┌──────────┐  fallo  ┌──────────┐  tiempo agotado ┌───────────┐
+  │  CLOSED  │────────▶│   OPEN   │────────────────▶│ HALF_OPEN │
+  │ (normal) │         │ (cortado)│                 │ (probando)│
+  └──────────┘         └──────────┘                 └───────────┘
+       ▲                                                    │
+       │                                           1 llamada fallida
+       └────────────────────────────────────────────────────┘
+                     vuelve a OPEN
+```
+
+| Estado | Comportamiento |
+|--------|---------------|
+| **CLOSED** | Operación normal. Las consultas al mainframe fluyen con normalidad. El circuit breaker lleva un contador de fallos consecutivos. |
+| **OPEN** | El sistema rechaza inmediatamente cualquier consulta al mainframe sin intentar la llamada, evitando acumulación de timeouts. Permanece abierto durante el período de reseteo configurado (por defecto 30 segundos). |
+| **HALF_OPEN** | Transcurrido el período de reseteo, se permite pasar una única llamada de prueba. Si tiene éxito, el circuito vuelve a CLOSED. Si falla, vuelve a OPEN y reinicia el temporizador. |
+
+### Caché inteligente
+
+Cada respuesta exitosa del mainframe se almacena en caché durante **1 hora**, indexada por número de documento. Las consultas repetidas para el mismo solicitante se sirven desde caché sin contactar el mainframe, eliminando la latencia de 8–15 segundos en consultas subsecuentes y reduciendo la presión sobre el sistema.
+
+### Score determinístico
+
+El score generado para un número de documento es siempre el mismo valor entre 300 y 999, derivado del número de documento como semilla. Esto garantiza reproducibilidad en auditorías y pruebas sin depender de respuestas variables del mainframe.
+
+### Comportamiento ante fallo del circuit breaker
+
+Cuando el buró no está disponible (circuit breaker OPEN), el `automationService` reintenta la consulta hasta **3 veces** con intervalos de 4 segundos antes de rendirse. Si agota los reintentos, la solicitud escala automáticamente a `MANUAL_REVIEW` en lugar de quedar bloqueada.
+
+### Parámetros configurables
+
+| Variable | Descripción | Por defecto |
+|----------|-------------|-------------|
+| `CREDIT_BUREAU_FAILURE_THRESHOLD` | Fallos consecutivos antes de abrir el circuito | `5` |
+| `CREDIT_BUREAU_RESET_TIMEOUT_MS` | Milisegundos en estado OPEN antes de pasar a HALF_OPEN | `30000` |
+| `CREDIT_BUREAU_TIMEOUT_MS` | Timeout máximo por llamada al mainframe | `15000` |
+
+### Monitoreo en tiempo real
+
+El estado actual del circuit breaker se expone en el endpoint de salud:
+
+```bash
+GET http://localhost:3007/health
+```
+```json
+{
+  "status": "ok",
+  "service": "external-data-service",
+  "circuit_breaker": {
+    "name": "credit-bureau",
+    "state": "CLOSED",
+    "failureCount": 0
+  }
+}
+```
+
+---
+
 ## Cómo probar en Postman (flujo completo)
 
 ### Paso 1 — Crear solicitud

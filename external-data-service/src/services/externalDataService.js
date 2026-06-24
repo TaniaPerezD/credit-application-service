@@ -88,29 +88,31 @@ async function getSummary(applicationId) {
     throw new NotFoundError(`No hay datos externos para la solicitud ${applicationId}`);
   }
 
-  const scores = {
-    credit_bureau: snapshot.credit_bureau_score,
-    utilities: snapshot.utility_payment_score,
-    wallets: snapshot.wallet_transaction_score,
-    ecommerce: snapshot.ecommerce_score,
-    mobile_topups: snapshot.mobile_topup_score,
-  };
+  const scoreValues = [
+    snapshot.credit_bureau_score,
+    snapshot.utility_payment_score,
+    snapshot.wallet_transaction_score,
+    snapshot.ecommerce_score,
+    snapshot.mobile_topup_score,
+  ];
 
-  const availableScores = Object.values(scores).filter((s) => s !== null);
+  const availableScores = scoreValues.filter((s) => s !== null);
   const compositeScore =
     availableScores.length > 0
       ? Math.round(availableScores.reduce((a, b) => a + b, 0) / availableScores.length)
       : null;
 
-  const sourcesCompleted = Object.values(scores).filter((s) => s !== null).length;
-
   return {
     application_id: applicationId,
-    scores,
+    credit_bureau_score: snapshot.credit_bureau_score,
+    utility_payment_score: snapshot.utility_payment_score,
+    wallet_transaction_score: snapshot.wallet_transaction_score,
+    ecommerce_score: snapshot.ecommerce_score,
+    mobile_topup_score: snapshot.mobile_topup_score,
     composite_score: compositeScore,
-    sources_completed: sourcesCompleted,
+    sources_completed: availableScores.length,
     sources_total: 5,
-    all_sources_ready: sourcesCompleted === 5,
+    all_sources_ready: availableScores.length === 5,
     raw_data: snapshot.raw_data,
     created_at: snapshot.created_at,
   };

@@ -1,4 +1,5 @@
 const service = require('../services/creditApplicationService');
+const auditService = require('../services/auditService');
 const { createApplicationSchema, updateStatusSchema } = require('../validators/creditApplicationValidator');
 
 async function createApplication(req, res, next) {
@@ -51,9 +52,19 @@ async function updateApplicationStatus(req, res, next) {
   }
 }
 
+async function getAuditTrail(req, res, next) {
+  try {
+    const events = await auditService.getAuditTrail(req.params.id);
+    res.status(200).json({ application_id: req.params.id, events });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   createApplication,
   getApplicationById,
   getApplicationsByApplicant,
   updateApplicationStatus,
+  getAuditTrail,
 };

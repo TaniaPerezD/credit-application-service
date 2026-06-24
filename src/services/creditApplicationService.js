@@ -1,4 +1,5 @@
 const { CreditApplication, ApplicationStatus } = require('../models/CreditApplication');
+const { recordEvent } = require('./auditService');
 
 const VALID_STATUS_TRANSITIONS = {
   [ApplicationStatus.CREATED]: [ApplicationStatus.DATA_COLLECTING, ApplicationStatus.REJECTED],
@@ -37,7 +38,12 @@ async function createApplication({ applicant_id, requested_amount, currency, ter
     purpose,
     status: ApplicationStatus.CREATED,
   });
-  return application.toJSON();
+  const json = application.toJSON();
+  await recordEvent(json.id, 'APPLICATION_CREATED', {
+    to_status: ApplicationStatus.CREATED,
+    payload: { applicant_id, requested_amount: json.requested_amount, currency: json.currency, term_months, purpose },
+  });
+  return json;
 }
 
 async function getApplicationById(id) {
@@ -65,7 +71,20 @@ async function updateApplicationStatus(id, { status }) {
     );
   }
 
+  const prevStatus = application.status;
   await application.update({ status, updated_at: new Date() });
+
+  await recordEvent(id, 'STATUS_CHANGED', {
+    from_status: prevStatus,
+    to_status: status,
+    payload: { triggered_by: 'system' },
+  });
+
+  if (status === ApplicationStatus.DATA_COLLECTING) {
+    const { runDataCollectionFlow } = require('./automationService');
+    runDataCollectionFlow(id, application.applicant_id, parseFloat(application.requested_amount));
+  }
+
   return application.toJSON();
 }
 
