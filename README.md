@@ -9,22 +9,6 @@ Repositorio con dos microservicios del ecosistema **NeoLend Financial Corp**:
 
 Ambos comparten la misma base de datos **Neon PostgreSQL** con schemas separados (`credit` y `scoring`).
 
----
-
-## Cobertura de la Rúbrica
-
-| N° MVP | Descripción | Ponderación | Cobertura |
-|--------|-------------|-------------|-----------|
-| 1 — Inciso I | Solicitud de crédito: creación con monto, plazo y motivo | 60% | `credit-application-service` — crea y persiste solicitudes en `credit.credit_applications` |
-| 1 — Inciso II | Motor de scoring con fuentes alternativas | 60% | `external-data-service` — consulta buró (IBM Z + circuit breaker), servicios públicos, billeteras, e-commerce, recargas; acumula scores en `scoring.external_data_snapshots` |
-| 1 — Inciso III | Aprobación automática basada en score | 60% | Preparado — umbrales configurables via env (`AUTO_APPROVAL_LIMIT`, `MIN_SCORE_APPROVAL`, `MIN_SCORE_MANUAL_REVIEW`) |
-| 2 — Inciso IV | Desembolso multi-canal | 70% | Transición de estado `APPROVED → DISBURSED` en `credit-application-service` |
-| 3 — Incisos VI–VIII | Portal inversionistas / fraude / gamificación | 80% | Expone estados y datos consultables por otros servicios |
-| 4 — Contexto b | Trazabilidad auditada con firma digital | 100% | `application_id` como raíz de agregado para `audit.event_store` |
-
-> El **motor de scoring final** (Inciso III) es responsabilidad del `scoring-service` (pendiente), que consume el `composite_score` del `external-data-service` y actualiza el estado via `credit-application-service`.
-
----
 
 ## Requisitos previos
 
